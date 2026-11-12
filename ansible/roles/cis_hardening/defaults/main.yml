@@ -1,0 +1,45 @@
+# Example values. Copy the role and set these for your own server.
+
+# Network settings in /etc/sysctl.d/61-cis-network.conf, in file order.
+# The same list is compared with the live kernel values.
+cis_hardening_sysctl:
+  - {key: net.ipv4.conf.all.send_redirects, value: "0"}
+  - {key: net.ipv4.conf.default.send_redirects, value: "0"}
+  - {key: net.ipv4.conf.all.secure_redirects, value: "0"}
+  - {key: net.ipv4.conf.default.secure_redirects, value: "0"}
+  - {key: net.ipv4.conf.all.log_martians, value: "1"}
+  - {key: net.ipv4.conf.default.log_martians, value: "1"}
+  - {key: net.ipv4.conf.all.rp_filter, value: "1"}
+  - {key: net.ipv4.conf.default.rp_filter, value: "1"}
+
+# Filesystems and USB storage the server never loads.
+cis_hardening_blocked_modules: [cramfs, freevxfs, hfs, hfsplus, jffs2, udf, usb-storage]
+
+# Users allowed to log in over SSH (key only). SET THIS to your own login user.
+# The role refuses to run if a listed user does not exist or has no
+# ~/.ssh/authorized_keys, because passwords are turned off.
+cis_hardening_ssh_allow_users: [admin]
+
+# The only targets an SSH local tunnel (ssh -L) may reach, as "host:port".
+# Empty = no tunnels at all. Before you empty it, find who uses tunnels today:
+# a dashboard reachable only over "ssh -L" breaks silently.
+cis_hardening_ssh_permit_open: []
+
+# Users who may define cron jobs.
+cis_hardening_cron_allow: [root]
+
+# Audit log rotation: size of one file in MB, and how many files are kept.
+cis_hardening_auditd_max_log_file: 8
+cis_hardening_auditd_num_logs: 5
+
+# Extra paths for auditd to watch (written, attributes changed), with a search key.
+# Example: [{path: /etc/docker, key: docker}]
+cis_hardening_audit_extra_watches: []
+
+# true in the container tests: skip what needs systemd or the audit subsystem
+# (reloading sshd, loading audit rules, starting auditd).
+cis_hardening_in_container: false
+
+# false only where /proc/sys is read-only (an unprivileged container): skip
+# loading the sysctl file and comparing it with the kernel.
+cis_hardening_sysctl_live: true

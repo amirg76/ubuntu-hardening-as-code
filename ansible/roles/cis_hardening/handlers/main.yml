@@ -1,0 +1,29 @@
+# Run only after a real change. In check mode they are listed, not run.
+# A container has no audit subsystem or systemd: those are skipped there.
+
+# Loads only this role's file. Its values are the wanted end state; the file name
+# (61) makes the same values win again at boot, when every file is loaded in order.
+- name: Load sysctl file
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/61-cis-network.conf
+  changed_when: true
+  when: cis_hardening_sysctl_live
+
+- name: Reload sshd
+  ansible.builtin.systemd_service:
+    name: ssh
+    state: reloaded
+  when: not cis_hardening_in_container
+
+- name: Load audit rules
+  ansible.builtin.command: augenrules --load
+  changed_when: true
+  when: not cis_hardening_in_container
+
+# Ubuntu 24.04 (audit 3.x) allows a manual restart. Distributions that set
+# RefuseManualStop=yes need "service auditd restart" instead. Check yours:
+#   systemctl show auditd -p RefuseManualStop
+- name: Restart auditd
+  ansible.builtin.systemd_service:
+    name: auditd
+    state: restarted
+  when: not cis_hardening_in_container

@@ -1,0 +1,6 @@
+# CIS network hardening. Managed by Ansible (cis_hardening).
+# Named 61 so it loads after Ubuntu's 10-network-security.conf (rp_filter=2):
+# for sysctl files the LAST value read wins. ip_forward is left alone: Docker needs it.
+{% for s in cis_hardening_sysctl %}
+{{ s.key }} = {{ s.value }}
+{% endfor %}

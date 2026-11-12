@@ -1,0 +1,231 @@
+# Each task states one piece of the hardening. Run with --check first:
+# "ok" means the server already matches, "changed" shows what would change.
+
+# --- Preflight: do not lock the owner out ----------------------------------------
+# The SSH file below allows only the listed users, by key only. If a listed user
+# does not exist or has no key, a real run would close the door behind you.
+- name: At least one SSH user is listed
+  ansible.builtin.assert:
+    that: cis_hardening_ssh_allow_users | length > 0
+    fail_msg: "cis_hardening_ssh_allow_users is empty: nobody could log in"
+    quiet: true
+  tags: [ssh]
+
+- name: Look up each SSH user
+  ansible.builtin.command: getent passwd {{ item }}
+  loop: "{{ cis_hardening_ssh_allow_users }}"
+  register: cis_hardening_ssh_users
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  tags: [ssh]
+
+- name: Look for each SSH user's key file
+  ansible.builtin.stat:
+    path: "{{ (item.stdout.split(':')[5] if item.rc == 0 else '/nonexistent') }}/.ssh/authorized_keys"
+  loop: "{{ cis_hardening_ssh_users.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  register: cis_hardening_ssh_user_keys
+  tags: [ssh]
+
+- name: Every SSH user exists and has a key
+  ansible.builtin.assert:
+    that:
+      - item.item.rc == 0
+      - item.stat.exists
+      - item.stat.size > 0
+    fail_msg: >-
+      {{ item.item.item }} is in cis_hardening_ssh_allow_users but does not exist or has no
+      ~/.ssh/authorized_keys: with passwords off, this run would lock that user out
+    quiet: true
+  loop: "{{ cis_hardening_ssh_user_keys.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.item }}"
+  tags: [ssh]
+
+# --- Network (sysctl) ---------------------------------------------------------
+- name: Network settings file
+  ansible.builtin.template:
+    src: 61-cis-network.conf.j2
+    dest: /etc/sysctl.d/61-cis-network.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: cis_hardening_sysctl_file
+  notify: Load sysctl file
+  tags: [sysctl]
+
+# Handlers normally run at the end of the play. The comparison below needs the
+# file loaded first: without this line a first real run fails the comparison,
+# never reaches the handler, and the next run has nothing left to notify it.
+- name: Load the file now if it changed
+  ansible.builtin.meta: flush_handlers
+  tags: [sysctl]
+
+# The file can match while the kernel still runs old values (file written, never
+# loaded). Read-only, so it also runs in check mode.
+- name: Read the live network values
+  ansible.builtin.command: sysctl -n {{ item.key }}
+  loop: "{{ cis_hardening_sysctl }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: cis_hardening_live_sysctl
+  changed_when: false
+  check_mode: false
+  when: cis_hardening_sysctl_live
+  tags: [sysctl]
+
+# In check mode with a file that would change, the kernel cannot match yet:
+# the diff of the file is the report, so the comparison is skipped.
+- name: Live values match the file
+  ansible.builtin.assert:
+    that: (item.stdout | trim) == (item.item.value | string)
+    fail_msg: "{{ item.item.key }} is {{ item.stdout }} in the kernel, {{ item.item.value }} in the file"
+    quiet: true
+  loop: "{{ cis_hardening_live_sysctl.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+  when:
+    - cis_hardening_sysctl_live
+    - not (ansible_check_mode and cis_hardening_sysctl_file is changed)
+  tags: [sysctl]
+
+# --- Kernel modules -------------------------------------------------------------
+- name: Unused filesystems and USB storage cannot load
+  ansible.builtin.template:
+    src: 60-cis-unused-fs.conf.j2
+    dest: /etc/modprobe.d/60-cis-unused-fs.conf
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [modules]
+
+# --- cron -----------------------------------------------------------------------
+- name: Only listed users may define cron jobs
+  ansible.builtin.template:
+    src: cron.allow.j2
+    dest: /etc/cron.allow
+    owner: root
+    group: root
+    mode: "0640"
+  tags: [cron]
+
+- name: Crontab readable by root only
+  ansible.builtin.file:
+    path: /etc/crontab
+    owner: root
+    group: root
+    mode: "0600"
+  tags: [cron]
+
+- name: Cron folders open to root only
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - /etc/cron.hourly
+    - /etc/cron.daily
+    - /etc/cron.weekly
+    - /etc/cron.monthly
+    - /etc/cron.d
+  tags: [cron]
+
+# --- SSH ------------------------------------------------------------------------
+- name: SSH main config readable by root only
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config
+    owner: root
+    group: root
+    mode: "0600"
+  tags: [ssh]
+
+# Before a real run that changes this file on a remote server: start a timer that
+# puts the old file back (see the README), and cancel it only after a new login
+# works. "validate" checks this file's own syntax; it cannot see a conflict with
+# a Match block elsewhere, so the new login is the real test.
+- name: SSH hardening (loaded first, so its values win)
+  ansible.builtin.template:
+    src: 00-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/00-hardening.conf
+    owner: root
+    group: root
+    mode: "0600"
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload sshd
+  tags: [ssh]
+
+- name: Look for an active root key file
+  ansible.builtin.stat:
+    path: "/root/.ssh/{{ item }}"
+  loop: [authorized_keys, authorized_keys2]
+  register: cis_hardening_root_keys
+  tags: [ssh]
+
+# An assert, not "state: absent": code that describes a server should not be able
+# to delete a key. Rename the file by hand if it must go.
+- name: No key file lets anyone log in as root
+  ansible.builtin.assert:
+    that: not item.stat.exists
+    fail_msg: "/root/.ssh/{{ item.item }} exists: root can log in with a key"
+    quiet: true
+  loop: "{{ cis_hardening_root_keys.results | default([]) }}"
+  loop_control:
+    label: "{{ item.item }}"
+  tags: [ssh]
+
+# --- auditd ---------------------------------------------------------------------
+- name: Audit daemon installed
+  ansible.builtin.apt:
+    name: auditd
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  tags: [auditd]
+
+# In check mode on a server without auditd the package is not really installed,
+# so its files do not exist yet. The tasks below then have nothing to compare
+# with and are skipped: "Audit daemon installed: changed" is the report.
+- name: Look for the audit daemon's config
+  ansible.builtin.stat:
+    path: /etc/audit/auditd.conf
+  register: cis_hardening_auditd_conf
+  tags: [auditd]
+
+- name: Audit rules
+  ansible.builtin.template:
+    src: 50-hardening.rules.j2
+    dest: /etc/audit/rules.d/50-hardening.rules
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load audit rules
+  when: cis_hardening_auditd_conf.stat.exists or not ansible_check_mode
+  tags: [auditd]
+
+- name: Audit log rotation
+  ansible.builtin.lineinfile:
+    path: /etc/audit/auditd.conf
+    regexp: "^{{ item.key }}\\s*="
+    line: "{{ item.key }} = {{ item.value }}"
+  loop:
+    - {key: max_log_file, value: "{{ cis_hardening_auditd_max_log_file }}"}
+    - {key: num_logs, value: "{{ cis_hardening_auditd_num_logs }}"}
+  loop_control:
+    label: "{{ item.key }}"
+  notify: Restart auditd
+  when: cis_hardening_auditd_conf.stat.exists or not ansible_check_mode
+  tags: [auditd]
+
+- name: Audit daemon running and started at boot
+  ansible.builtin.systemd_service:
+    name: auditd
+    enabled: true
+    state: started
+  when:
+    - not cis_hardening_in_container
+    - cis_hardening_auditd_conf.stat.exists or not ansible_check_mode
+  tags: [auditd]

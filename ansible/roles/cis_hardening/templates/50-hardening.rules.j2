@@ -1,0 +1,42 @@
+## Managed by Ansible (cis_hardening). Search one area: sudo ausearch -k <key> -i
+## Without a terminal (scripts, cron), add --input-logs or ausearch reads stdin.
+-w /etc/passwd -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/gshadow -p wa -k identity
+-w /etc/security/opasswd -p wa -k identity
+-w /etc/sudoers -p wa -k scope
+-w /etc/sudoers.d -p wa -k scope
+-w /etc/ssh/sshd_config -p wa -k sshd
+-w /etc/ssh/sshd_config.d -p wa -k sshd
+-w /root/.ssh -p wa -k ssh_keys
+{% for u in cis_hardening_ssh_allow_users %}
+-w /home/{{ u }}/.ssh -p wa -k ssh_keys
+{% endfor %}
+-w /etc/sysctl.conf -p wa -k sysctl
+-w /etc/sysctl.d -p wa -k sysctl
+-w /etc/modprobe.d -p wa -k modules
+-w /usr/bin/kmod -p x -k modules
+-w /etc/crontab -p wa -k cron
+-w /etc/cron.d -p wa -k cron
+-w /etc/cron.allow -p wa -k cron
+-w /etc/systemd/system -p wa -k systemd
+-w /etc/ufw -p wa -k firewall
+-w /etc/audit -p wa -k audit_config
+{% for w in cis_hardening_audit_extra_watches %}
+-w {{ w.path }} -p wa -k {{ w.key }}
+{% endfor %}
+-w /var/log/lastlog -p wa -k logins
+-w /var/run/utmp -p wa -k session
+-w /var/log/wtmp -p wa -k session
+-w /var/log/btmp -p wa -k session
+-w /etc/localtime -p wa -k time-change
+-a always,exit -F arch=b64 -S settimeofday,clock_settime -k time-change
+-a always,exit -F arch=b32 -S settimeofday,clock_settime -k time-change
+-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k modules
+## Commands that run as root for a person who logged in (auid = login user).
+## Services started by systemd have no login user and are not recorded here.
+-a always,exit -F arch=b64 -S execve -F euid=0 -F auid>=1000 -F auid!=unset -k root_cmd
+-a always,exit -F arch=b32 -S execve -F euid=0 -F auid>=1000 -F auid!=unset -k root_cmd
+-a always,exit -F arch=b64 -S mount,umount2 -F auid>=1000 -F auid!=unset -k mounts
+-a always,exit -F arch=b64 -S chmod,fchmod,fchmodat,chown,fchown,fchownat,lchown -F auid>=1000 -F auid!=unset -k perm_mod

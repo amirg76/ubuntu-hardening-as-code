@@ -1,0 +1,10 @@
+# Check first, always:
+#   sudo ansible-playbook --check --diff site.yml
+- name: Ubuntu server hardening (CIS-inspired)
+  hosts: servers
+  gather_facts: false
+  # A task that fails late must not leave a changed file unloaded: run the
+  # handlers that were already notified even then.
+  force_handlers: true
+  roles:
+    - cis_hardening

@@ -1,0 +1,5 @@
+# Filesystems and USB storage this server never uses. Managed by Ansible (cis_hardening).
+{% for m in cis_hardening_blocked_modules %}
+install {{ m }} /bin/false
+blacklist {{ m }}
+{% endfor %}
