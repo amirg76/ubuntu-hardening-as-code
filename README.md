@@ -98,12 +98,19 @@ new login is the real test.
 5. **Verify against the target, not the textbook.** A comment claimed auditd
    refuses `systemctl restart`. True on some distributions; on Ubuntu 24.04
    `RefuseManualStop=no`.
+6. **"Survives a reboot" is only proven by a reboot.** `sysctl --system` showed
+   the right values, so the hardening was called reboot-safe. After the first
+   real reboot `log_martians` was 0 again: ufw applies its own
+   `/etc/ufw/sysctl.conf` when it starts, after systemd has loaded
+   `/etc/sysctl.d`, and that file says 0. Every file looked right; the daily
+   file-hash audit saw nothing. The live-value comparison caught it the next
+   morning. The role now also fixes the line in ufw's file, and a test covers it.
 
 ## Tests
 
 ```bash
 bash test/run-tests.sh    # needs Docker; a few minutes
-bash test/mutations.sh    # breaks the role seven ways; every break must be caught
+bash test/mutations.sh    # breaks the role eight ways; every break must be caught
 bash test/lint.sh         # yamllint + ansible-lint (production profile)
 ```
 
@@ -111,7 +118,7 @@ A throwaway Ubuntu 24.04 container plays the server. It has no systemd, so
 reloading sshd, loading audit rules into the kernel and starting auditd are
 **not** tested (`cis_hardening_in_container=true` skips them).
 
-**Main tests (unprivileged container), 36 checks:**
+**Main tests (unprivileged container), 37 checks:**
 
 - check mode on a fresh server without auditd reports changes, fails nothing and
   writes nothing; the first real run installs auditd and changes the server; the

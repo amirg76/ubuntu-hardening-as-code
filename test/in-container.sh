@@ -30,6 +30,11 @@ install -d -m 700 -o admin -g admin /home/admin/.ssh
 ssh-keygen -q -t ed25519 -N '' -f /tmp/testkey
 install -m 600 -o admin -g admin /tmp/testkey.pub /home/admin/.ssh/authorized_keys
 
+# A firewall sysctl file as ufw ships it: it turns martian logging off at boot.
+# It has no line for "default": the role must change what exists and add nothing.
+mkdir -p /etc/ufw
+printf '%s\n' 'net/ipv4/icmp_echo_ignore_all=0' 'net/ipv4/conf/all/log_martians=0' > /etc/ufw/sysctl.conf
+
 # 1. Check mode on a fresh server (auditd not installed): a report, not an error.
 dpkg-query -W auditd >/dev/null 2>&1 && fail "control: auditd is preinstalled, the fresh-server path is not tested" \
   || pass "control: auditd is not installed yet"
@@ -46,6 +51,10 @@ play /tmp/r1
   || { fail "first run"; grep -E 'fatal|FAILED' /tmp/r1 | cut -c1-300; }
 dpkg-query -W -f='${Status}' auditd 2>/dev/null | grep -q 'install ok installed' \
   && pass "auditd installed by the role" || fail "auditd not installed"
+
+[ "$(cat /etc/ufw/sysctl.conf)" = "$(printf '%s\n' 'net/ipv4/icmp_echo_ignore_all=0' 'net/ipv4/conf/all/log_martians=1')" ] \
+  && pass "the firewall's sysctl file no longer undoes log_martians; nothing else changed or added" \
+  || { fail "firewall sysctl file"; cat /etc/ufw/sysctl.conf; }
 
 # 3. Second run changes nothing (idempotent).
 play /tmp/r2

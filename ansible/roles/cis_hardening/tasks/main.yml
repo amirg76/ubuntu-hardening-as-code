@@ -45,6 +45,30 @@
   tags: [ssh]
 
 # --- Network (sysctl) ---------------------------------------------------------
+# ufw applies its own sysctl file (/etc/ufw/sysctl.conf) when it starts, AFTER
+# systemd has loaded /etc/sysctl.d. A value it also sets (log_martians=0 by
+# default) therefore wins at every boot: the hardening holds until the first
+# reboot and is then silently undone, with every file still looking right.
+# Lines that exist there are changed to the wanted value; none are added.
+- name: Look for the firewall's own sysctl file
+  ansible.builtin.stat:
+    path: /etc/ufw/sysctl.conf
+  register: cis_hardening_ufw_sysctl
+  tags: [sysctl]
+
+- name: The firewall's sysctl file does not undo these values at boot
+  ansible.builtin.lineinfile:
+    path: /etc/ufw/sysctl.conf
+    regexp: "^#?{{ item.key | replace('.', '/') }}=.*$"
+    line: "{{ item.key | replace('.', '/') }}={{ item.value }}"
+    backrefs: true
+  loop: "{{ cis_hardening_sysctl }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when: cis_hardening_ufw_sysctl.stat.exists
+  notify: Load sysctl file
+  tags: [sysctl]
+
 - name: Network settings file
   ansible.builtin.template:
     src: 61-cis-network.conf.j2
