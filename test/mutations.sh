@@ -24,5 +24,6 @@ mutant "root key assert always true"          "$T" 's/that: not item.stat.exists
 mutant "sysctl file not loaded before the comparison" "$T" 's/ansible.builtin.meta: flush_handlers/ansible.builtin.meta: noop/'
 mutant "preflight accepts any user"           "$T" 's/^      - item\.\(item\.rc == 0\|stat\.exists\|stat\.size > 0\)$/      - true/'
 mutant "Unix-socket tunnels left on"          "$S" '/AllowStreamLocalForwarding no/d'
+mutant "effective sshd settings not compared" "$T" 's/that: item in cis_hardening_live_sshd.stdout_lines/that: true/'
 echo "survived: $survived"
 exit "$survived"

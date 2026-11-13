@@ -75,6 +75,16 @@ echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
 [ "$(sshd_val passwordauthentication)" = no ] && pass "a later 'PasswordAuthentication yes' in sshd_config loses" || fail "first-value-wins"
 sed -i '$ d' /etc/ssh/sshd_config
 
+# 6b. Negative control: a drop-in that sorts BEFORE the hardening file wins, so the
+#     file is right and the server is not. Only "sshd -T" shows it.
+echo 'PasswordAuthentication yes' > /etc/ssh/sshd_config.d/00-a-earlier.conf
+play /tmp/r4b --check
+[ "$(recap /tmp/r4b changed)" = 0 ] && [ "$(recap /tmp/r4b failed)" = 1 ] \
+  && grep -q "sshd -T does not say 'passwordauthentication no'" /tmp/r4b \
+  && pass "an earlier drop-in that re-enables passwords is caught although the file matches" \
+  || { fail "overriding drop-in not caught"; grep -E '^localhost' /tmp/r4b; }
+rm -f /etc/ssh/sshd_config.d/00-a-earlier.conf
+
 # 7. Negative control: drift on the server must show up in check mode.
 chmod 644 /etc/crontab
 play /tmp/r5 --check --diff

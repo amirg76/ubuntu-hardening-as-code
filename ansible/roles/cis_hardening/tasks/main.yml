@@ -155,7 +155,40 @@
     group: root
     mode: "0600"
     validate: /usr/sbin/sshd -t -f %s
+  register: cis_hardening_ssh_file
   notify: Reload sshd
+  tags: [ssh]
+
+# The file can be right and still lose: for sshd the first value wins, so another
+# drop-in that sorts before this one (or a Match block) overrides it silently.
+# "sshd -T" prints what a new connection would really get.
+- name: Reload sshd now if the file changed
+  ansible.builtin.meta: flush_handlers
+  tags: [ssh]
+
+- name: Read the settings sshd would use for a new connection
+  ansible.builtin.command: sshd -T
+  register: cis_hardening_live_sshd
+  changed_when: false
+  check_mode: false
+  tags: [ssh]
+
+- name: The effective SSH settings are the hardened ones
+  ansible.builtin.assert:
+    that: item in cis_hardening_live_sshd.stdout_lines
+    fail_msg: "sshd -T does not say '{{ item }}': another file or a Match block overrides the hardening"
+    quiet: true
+  loop:
+    - passwordauthentication no
+    - permitrootlogin no
+    - kbdinteractiveauthentication no
+    - "allowusers {{ cis_hardening_ssh_allow_users | join(' ') }}"
+    - maxauthtries 3
+    - allowagentforwarding no
+    - allowstreamlocalforwarding no
+    - "allowtcpforwarding {{ 'local' if cis_hardening_ssh_permit_open else 'no' }}"
+    - loglevel VERBOSE
+  when: not (ansible_check_mode and cis_hardening_ssh_file is changed)
   tags: [ssh]
 
 - name: Look for an active root key file

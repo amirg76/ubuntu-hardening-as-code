@@ -16,7 +16,9 @@ The point is less the settings than how they are verified:
   settings, not the whole server.
 - **The file and the running value.** A sysctl file can be right while the kernel
   still runs the old value (written, never loaded). The role loads the file,
-  then reads the live values and fails if they differ.
+  then reads the live values and fails if they differ. The same for SSH: for
+  sshd the first value wins, so an earlier drop-in can override a correct file;
+  the role reads the effective settings (`sshd -T`) and fails if they differ.
 - **Negative controls.** A check that always says 0 looks the same as a check that
   compares nothing. The tests break things on purpose and expect them to be caught,
   and `test/mutations.sh` breaks the role itself and expects the tests to fail.
@@ -101,7 +103,7 @@ new login is the real test.
 
 ```bash
 bash test/run-tests.sh    # needs Docker; a few minutes
-bash test/mutations.sh    # breaks the role six ways; every break must be caught
+bash test/mutations.sh    # breaks the role seven ways; every break must be caught
 bash test/lint.sh         # yamllint + ansible-lint (production profile)
 ```
 
@@ -109,7 +111,7 @@ A throwaway Ubuntu 24.04 container plays the server. It has no systemd, so
 reloading sshd, loading audit rules into the kernel and starting auditd are
 **not** tested (`cis_hardening_in_container=true` skips them).
 
-**Main tests (unprivileged container), 35 checks:**
+**Main tests (unprivileged container), 36 checks:**
 
 - check mode on a fresh server without auditd reports changes, fails nothing and
   writes nothing; the first real run installs auditd and changes the server; the
@@ -117,6 +119,8 @@ reloading sshd, loading audit rules into the kernel and starting auditd are
 - the state is read back from the system (`sshd -T`, `stat`, the files), not from
   Ansible's report; a later `PasswordAuthentication yes` in the main file loses
   to the 00 file;
+- an earlier drop-in that re-enables passwords is caught by the effective
+  settings check, although the hardening file itself matches;
 - drift (`/etc/crontab` set to 644) is reported by check mode, check mode writes
   nothing, and a real run repairs it;
 - an empty root key file fails the assert and is not deleted;
