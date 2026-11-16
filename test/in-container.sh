@@ -30,6 +30,15 @@ install -d -m 700 -o admin -g admin /home/admin/.ssh
 ssh-keygen -q -t ed25519 -N '' -f /tmp/testkey
 install -m 600 -o admin -g admin /tmp/testkey.pub /home/admin/.ssh/authorized_keys
 
+# A running sshd, so the role's running-daemon check has something to ask.
+# offers: the login methods the RUNNING daemon accepts (no login happens).
+offers() { ssh -o BatchMode=yes -o PreferredAuthentications=none -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile=/dev/null admin@127.0.0.1 true 2>&1 | grep -o 'Permission denied ([^)]*)'; }
+start_sshd() { /usr/sbin/sshd "$@"; for _ in 1 2 3 4 5; do offers >/dev/null && return; sleep 1; done; }
+start_sshd
+[ "$(offers)" = "Permission denied (publickey,password)" ] \
+  && pass "control: the fresh running sshd offers passwords" || fail "control: fresh sshd offers: $(offers)"
+
 # A firewall sysctl file as ufw ships it: it turns martian logging off at boot.
 # It has no line for "default": the role must change what exists and add nothing.
 mkdir -p /etc/ufw
@@ -72,6 +81,8 @@ play /tmp/r3 --check --diff
 [ "$(sshd_val passwordauthentication)" = no ] && pass "sshd: no passwords" || fail "sshd passwordauthentication"
 [ "$(sshd_val allowusers)" = admin ] && pass "sshd: AllowUsers admin" || fail "sshd allowusers"
 [ "$(sshd_val loglevel)" = VERBOSE ] && pass "sshd: LogLevel VERBOSE" || fail "sshd loglevel"
+[ "$(offers)" = "Permission denied (publickey)" ] \
+  && pass "the RUNNING sshd was reloaded: it offers key login only" || fail "running sshd offers: $(offers)"
 [ "$(stat -c %a /etc/crontab)" = 600 ] && pass "crontab 600" || fail "crontab mode"
 [ "$(stat -c %a /etc/cron.d)" = 700 ] && pass "cron.d 700" || fail "cron.d mode"
 [ "$(cat /etc/cron.allow)" = root ] && pass "cron.allow = root" || fail "cron.allow"
@@ -146,6 +157,24 @@ play /tmp/r11 -e '{"cis_hardening_ssh_allow_users": []}'
   && pass "an empty user list stops the run" || fail "preflight: empty list"
 [ "$(sha256sum "$SSHF" 2>/dev/null || echo missing)" = "$before" ] && [ "$(sshd_val allowusers)" = admin ] \
   && pass "after the three refused runs the sshd file still allows admin" || fail "sshd file changed by a refused run"
+
+# 12. Negative control: the files are hardened, the running daemon is not (as
+#     after a change that was never reloaded). Only asking the daemon shows it.
+#     First back to the defaults (step 9 left a tunnel target and num_logs 7):
+#     in check mode a file that would change skips the comparison.
+play /tmp/r12a
+[ "$(recap /tmp/r12a failed)" = 0 ] && pass "back to the default values" || fail "reset run"
+pkill -x sshd; sleep 1
+start_sshd -o PasswordAuthentication=yes
+[ "$(sshd_val passwordauthentication)" = no ] && [ "$(offers)" = "Permission denied (publickey,password)" ] \
+  && pass "control: sshd -T says no passwords while the running daemon offers them" \
+  || fail "control: stale daemon setup ($(sshd_val passwordauthentication), $(offers))"
+play /tmp/r12 --check
+[ "$(recap /tmp/r12 changed)" = 0 ] && [ "$(recap /tmp/r12 failed)" = 1 ] \
+  && grep -q 'The running sshd does not answer "publickey" only' /tmp/r12 \
+  && pass "a running sshd that still offers passwords is caught although every file matches" \
+  || { fail "stale running sshd not caught"; grep -E '^localhost|msg' /tmp/r12 | head -3; }
+pkill -x sshd; sleep 1; start_sshd
 
 echo "failures: $fails"
 exit "$fails"

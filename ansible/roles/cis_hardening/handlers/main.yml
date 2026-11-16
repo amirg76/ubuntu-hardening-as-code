@@ -8,11 +8,24 @@
   changed_when: true
   when: cis_hardening_sysctl_live
 
-- name: Reload sshd
+- name: Reload sshd with systemd
   ansible.builtin.systemd_service:
     name: ssh
     state: reloaded
   when: not cis_hardening_in_container
+  listen: Reload sshd
+
+# Without systemd, SIGHUP to the listening sshd (the oldest process named sshd)
+# makes it reread its files. Skipping this left the old settings running while
+# "sshd -T" showed the new ones (found 16.11.2026 in a three-server lab).
+# rc 1 = no sshd running: then the running-daemon check reports it.
+- name: Reload sshd without systemd
+  ansible.builtin.command: pkill -HUP -o -x sshd
+  register: cis_hardening_sshd_hup
+  changed_when: cis_hardening_sshd_hup.rc == 0
+  failed_when: cis_hardening_sshd_hup.rc > 1
+  when: cis_hardening_in_container
+  listen: Reload sshd
 
 - name: Load audit rules
   ansible.builtin.command: augenrules --load

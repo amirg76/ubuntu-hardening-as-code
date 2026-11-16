@@ -19,6 +19,10 @@ The point is less the settings than how they are verified:
   then reads the live values and fails if they differ. The same for SSH: for
   sshd the first value wins, so an earlier drop-in can override a correct file;
   the role reads the effective settings (`sshd -T`) and fails if they differ.
+  But `sshd -T` reads the files, not the daemon: an sshd that was never
+  reloaded still offers passwords. So the role also asks the running daemon
+  (a client that offers no login method gets back the list the server accepts)
+  and fails unless the answer is `publickey` only.
 - **Negative controls.** A check that always says 0 looks the same as a check that
   compares nothing. The tests break things on purpose and expect them to be caught,
   and `test/mutations.sh` breaks the role itself and expects the tests to fail.
@@ -105,20 +109,26 @@ new login is the real test.
    `/etc/sysctl.d`, and that file says 0. Every file looked right; the daily
    file-hash audit saw nothing. The live-value comparison caught it the next
    morning. The role now also fixes the line in ufw's file, and a test covers it.
+7. **The file is not the running daemon.** Run against three servers over SSH,
+   the role left every `sshd -T` saying "no passwords" while every running sshd
+   still offered them: the reload needed systemd and was skipped in containers.
+   `sshd -T` parses the files, so it cannot see this. The role now reloads
+   without systemd too, and asks the running daemon what it offers.
 
 ## Tests
 
 ```bash
 bash test/run-tests.sh    # needs Docker; a few minutes
-bash test/mutations.sh    # breaks the role eight ways; every break must be caught
+bash test/mutations.sh    # breaks the role ten ways; every break must be caught
 bash test/lint.sh         # yamllint + ansible-lint (production profile)
 ```
 
 A throwaway Ubuntu 24.04 container plays the server. It has no systemd, so
-reloading sshd, loading audit rules into the kernel and starting auditd are
-**not** tested (`cis_hardening_in_container=true` skips them).
+loading audit rules into the kernel and starting auditd are **not** tested
+(`cis_hardening_in_container=true` skips them). sshd runs in the container and
+is reloaded with SIGHUP instead of systemd.
 
-**Main tests (unprivileged container), 37 checks:**
+**Main tests (unprivileged container), 42 checks:**
 
 - check mode on a fresh server without auditd reports changes, fails nothing and
   writes nothing; the first real run installs auditd and changes the server; the
@@ -135,7 +145,9 @@ reloading sshd, loading audit rules into the kernel and starting auditd are
   default is 5, so 5 would prove nothing) reaches `auditd.conf` exactly once;
 - an invalid `PermitOpen` is rejected by `sshd -t` and the live file is unchanged;
 - a user without a key, a user that does not exist and an empty user list each
-  stop the run, and the SSH file still allows the original user.
+  stop the run, and the SSH file still allows the original user;
+- the running sshd offers passwords before the run and key login only after it;
+  a daemon started with passwords on, while every file says no, is caught.
 
 **Live sysctl tests (privileged container, only `--tags sysctl`), 7 checks.**
 The tasks write only `net.ipv4.conf.*`, which belong to the container's own

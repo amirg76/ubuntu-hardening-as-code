@@ -25,6 +25,12 @@ cis_hardening_ssh_allow_users: [admin]
 # a dashboard reachable only over "ssh -L" breaks silently.
 cis_hardening_ssh_permit_open: []
 
+# Ask the RUNNING sshd which login methods it offers ("sshd -T" reads only the
+# files). The role connects to this address on the port from "sshd -T". Set the
+# address to one sshd listens on; set false only where no sshd runs.
+cis_hardening_ssh_check_running: true
+cis_hardening_ssh_check_address: 127.0.0.1
+
 # Users who may define cron jobs.
 cis_hardening_cron_allow: [root]
 
@@ -37,7 +43,7 @@ cis_hardening_auditd_num_logs: 5
 cis_hardening_audit_extra_watches: []
 
 # true in the container tests: skip what needs systemd or the audit subsystem
-# (reloading sshd, loading audit rules, starting auditd).
+# (loading audit rules, starting auditd); sshd is reloaded with SIGHUP instead.
 cis_hardening_in_container: false
 
 # false only where /proc/sys is read-only (an unprivileged container): skip

@@ -215,6 +215,55 @@
   when: not (ansible_check_mode and cis_hardening_ssh_file is changed)
   tags: [ssh]
 
+# "sshd -T" reads the FILES. A daemon that was never reloaded still runs the old
+# settings, and nothing above can see it. So ask the running daemon itself: a
+# client that offers no login method gets back the list the server accepts.
+# Nothing logs in; the server logs "Connection closed by authenticating user".
+- name: Ask the running sshd which login methods it offers
+  ansible.builtin.command:
+    argv:
+      - ssh
+      - -o
+      - BatchMode=yes
+      - -o
+      - PreferredAuthentications=none
+      - -o
+      - StrictHostKeyChecking=no
+      - -o
+      - UserKnownHostsFile=/dev/null
+      - -o
+      - LogLevel=ERROR
+      - -p
+      - "{{ (cis_hardening_live_sshd.stdout_lines | select('match', '^port ') | first).split()[1] }}"
+      - "{{ cis_hardening_ssh_allow_users | first }}@{{ cis_hardening_ssh_check_address }}"
+      - "true"
+  register: cis_hardening_running_sshd
+  # A reloaded sshd re-executes itself; without systemd holding the socket the
+  # port can be closed for a moment.
+  until: "'Connection refused' not in cis_hardening_running_sshd.stderr"
+  retries: 5
+  delay: 1
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when:
+    - cis_hardening_ssh_check_running
+    - not (ansible_check_mode and cis_hardening_ssh_file is changed)
+  tags: [ssh]
+
+- name: The running sshd offers key login only
+  ansible.builtin.assert:
+    that: "'Permission denied (publickey).' in cis_hardening_running_sshd.stderr"
+    fail_msg: >-
+      The running sshd does not answer "publickey" only (it was not reloaded, or
+      is not listening on {{ cis_hardening_ssh_check_address }}):
+      {{ cis_hardening_running_sshd.stderr | trim }}
+    quiet: true
+  when:
+    - cis_hardening_ssh_check_running
+    - not (ansible_check_mode and cis_hardening_ssh_file is changed)
+  tags: [ssh]
+
 - name: Look for an active root key file
   ansible.builtin.stat:
     path: "/root/.ssh/{{ item }}"

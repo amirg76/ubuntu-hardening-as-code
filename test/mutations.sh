@@ -26,5 +26,8 @@ mutant "preflight accepts any user"           "$T" 's/^      - item\.\(item\.rc 
 mutant "Unix-socket tunnels left on"          "$S" '/AllowStreamLocalForwarding no/d'
 mutant "firewall sysctl file left alone"      "$T" 's/  when: cis_hardening_ufw_sysctl.stat.exists/  when: false/'
 mutant "effective sshd settings not compared" "$T" 's/that: item in cis_hardening_live_sshd.stdout_lines/that: true/'
+H=roles/cis_hardening/handlers/main.yml
+mutant "sshd not reloaded without systemd"    "$H" 's|pkill -HUP -o -x sshd|/bin/true|'
+mutant "running sshd not asked"               "$T" "s/that: \"'Permission denied (publickey).' in cis_hardening_running_sshd.stderr\"/that: true/"
 echo "survived: $survived"
 exit "$survived"
